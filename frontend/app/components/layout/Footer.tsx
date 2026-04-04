@@ -75,7 +75,7 @@ export default function Footer() {
             </li>
 
             <li>
-              <Link href="/map" className="relative group inline-block">
+              <Link href="/maplocation" className="relative group inline-block">
                 <span className="group-hover:text-[#C8A96A] transition">
                   Cửa hàng
                 </span>

@@ -32,7 +32,7 @@ export default function OrderCakePage() {
                 Xem sản phẩm
               </Link>
               <Link
-                href="/products"
+                href="/custom-cake"
                 className="bg-white text-black px-7 py-3.5 text-sm tracking-wide hover:text-[#C8A96A]  transition">
                 Liên hệ đặt bánh
               </Link>

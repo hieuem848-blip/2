@@ -5,7 +5,7 @@ import { adminDashboardApi, formatPrice, DashboardData, ORDER_STATUS, } from "..
 import Link from "next/link";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, } from "recharts";
 
-// ── Mock monthly data (replace with real API when available) ─────────────────
+// ── Mock monthly data (dùng tạm cho biểu đồ) ─────────────────
 const monthlyRevenue = [
   { month: "T1", revenue: 12000000 },
   { month: "T2", revenue: 19000000 },

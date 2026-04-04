@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { adminChatApi, type AdminChatSession, type AdminChatMessage } from "@/app/lib/adminApi";
 import { useAdminAuth } from "@/app/context/AdminAuthContext";
+import AdminShell from "../components/AdminShell";
 
 export default function AdminChatPage() {
   const { user } = useAdminAuth();
@@ -162,7 +163,8 @@ export default function AdminChatPage() {
   const closedChats = filteredChats.filter((c) => c.status === "closed");
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <AdminShell>
+    <div className="flex h-full bg-gray-50 overflow-hidden">
       {/* ── SIDEBAR ── */}
       <div className="w-80 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col">
         {/* Header sidebar */}
@@ -173,7 +175,7 @@ export default function AdminChatPage() {
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </div>
-            <h1 className="font-bold text-gray-800">Tin nhắn</h1>
+            <h1 className="text-2xl font-bold text-gray-800">Tin nhắn</h1>
             {openChats.length > 0 && (
               <span className="ml-auto text-xs font-semibold text-white px-2 py-0.5 rounded-full" style={{ background: "#e879a0" }}>
                 {openChats.length}
@@ -274,23 +276,6 @@ export default function AdminChatPage() {
                 <p className="font-semibold text-gray-800 truncate">{getCustomerName(selectedChat)}</p>
                 <p className="text-xs text-gray-400 truncate">{getCustomerEmail(selectedChat)}</p>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                  selectedChat.status === "closed"
-                    ? "bg-gray-100 text-gray-500"
-                    : "bg-green-100 text-green-700"
-                }`}>
-                  {selectedChat.status === "closed" ? "Đã đóng" : "Đang mở"}
-                </span>
-                {selectedChat.status !== "closed" && (
-                  <button
-                    onClick={handleClose}
-                    className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    Đóng chat
-                  </button>
-                )}
-              </div>
             </div>
 
             {/* Messages */}
@@ -373,6 +358,7 @@ export default function AdminChatPage() {
         )}
       </div>
     </div>
+    </AdminShell>
   );
 }
 
