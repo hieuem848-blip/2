@@ -122,7 +122,7 @@ export default function CustomCakePage() {
   };
 
   return (
-    <div className="min-h-screen bg-white pb-20">
+    <div className="min-h-screen bg-gray-100 pb-10">
       <section className="relative w-full h-[300px]">
         <Image src="/cakebg.png" alt="AI Cake Detection" fill className="object-cover" priority />
         <div className="absolute inset-0 bg-black/40"></div>

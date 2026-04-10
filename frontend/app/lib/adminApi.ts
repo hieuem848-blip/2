@@ -105,6 +105,63 @@ export interface CustomCakeRequest {
 // ── DASHBOARD ────────────────────────────────────────────────────────────────
 export const adminDashboardApi = {
   get: () => adminFetch<DashboardData>("/admin/dashboards"),
+  getMonthlyRevenue: (year?: number) =>
+    adminFetch<{ year: number; monthly: { month: string; revenue: number; orders: number }[] }>(
+      `/admin/dashboards/monthly-revenue${year ? `?year=${year}` : ""}`
+    ),
+};
+
+// ── INVENTORY ────────────────────────────────────────────────────────────────
+export interface Ingredient {
+  _id: string;
+  name: string;
+  unit: string;
+  stock: number;
+  minThreshold: number;
+  createdAt: string;
+}
+
+export interface InventoryLog {
+  _id: string;
+  ingredient: { _id: string; name: string; unit: string } | string;
+  ingredientName: string;
+  type: "import" | "export" | "spoilage";
+  quantity: number;
+  reason: string;
+  createdBy?: { _id: string; displayName: string } | string;
+  createdAt: string;
+}
+
+export interface InventoryStats {
+  total: number;
+  lowStock: number;
+  todayTransactions: number;
+}
+
+export const adminInventoryApi = {
+  getStats: () => adminFetch<InventoryStats>("/admin/inventory/stats"),
+  getAll: () => adminFetch<{ ingredients: Ingredient[] }>("/admin/inventory"),
+  create: (data: { name: string; unit: string; stock: number; minThreshold: number }) =>
+    adminFetch<{ ingredient: Ingredient }>("/admin/inventory", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: { name?: string; unit?: string; minThreshold?: number }) =>
+    adminFetch<{ ingredient: Ingredient }>(`/admin/inventory/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => adminFetch(`/admin/inventory/${id}`, { method: "DELETE" }),
+  movement: (
+    id: string,
+    data: { type: "import" | "export" | "spoilage"; quantity: number; reason?: string }
+  ) =>
+    adminFetch<{ ingredient: Ingredient; log: InventoryLog }>(`/admin/inventory/${id}/movement`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getLogs: (limit?: number) =>
+    adminFetch<{ logs: InventoryLog[] }>(`/admin/inventory/logs${limit ? `?limit=${limit}` : ""}`),
 };
 
 // ── PRODUCTS ─────────────────────────────────────────────────────────────────

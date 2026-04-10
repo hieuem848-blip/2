@@ -1,25 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import AdminShell from "../components/AdminShell";
-import { adminDashboardApi, formatPrice, DashboardData, ORDER_STATUS, } from "../../lib/adminApi";
+import { adminDashboardApi, formatPrice, DashboardData, ORDER_STATUS } from "../../lib/adminApi";
 import Link from "next/link";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, } from "recharts";
-
-// ── Mock monthly data (dùng tạm cho biểu đồ) ─────────────────
-const monthlyRevenue = [
-  { month: "T1", revenue: 12000000 },
-  { month: "T2", revenue: 19000000 },
-  { month: "T3", revenue: 15000000 },
-  { month: "T4", revenue: 27000000 },
-  { month: "T5", revenue: 22000000 },
-  { month: "T6", revenue: 31000000 },
-  { month: "T7", revenue: 28000000 },
-  { month: "T8", revenue: 35000000 },
-  { month: "T9", revenue: 30000000 },
-  { month: "T10", revenue: 42000000 },
-  { month: "T11", revenue: 38000000 },
-  { month: "T12", revenue: 50000000 },
-];
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
 const PIE_COLORS = ["#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
 
@@ -69,6 +53,10 @@ function formatVND(n: number) {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<{ month: string; revenue: number; orders: number }[]>([]);
+  const [chartLoading, setChartLoading] = useState(false);
 
   useEffect(() => {
     adminDashboardApi
@@ -77,6 +65,15 @@ export default function DashboardPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    setChartLoading(true);
+    adminDashboardApi
+      .getMonthlyRevenue(selectedYear)
+      .then((res) => setMonthlyRevenue(res.monthly))
+      .catch(console.error)
+      .finally(() => setChartLoading(false));
+  }, [selectedYear]);
 
   if (loading)
     return (
@@ -211,13 +208,29 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-base font-bold text-gray-800">Doanh thu theo tháng</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Biểu đồ doanh thu năm hiện tại</p>
+                <p className="text-xs text-gray-400 mt-0.5">Biểu đồ doanh thu thực tế từ đơn hoàn thành</p>
               </div>
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <span className="inline-block w-3 h-3 rounded-sm bg-amber-400" />
-                Doanh thu (VNĐ)
+              <div className="flex items-center gap-3">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white"
+                >
+                  {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span className="inline-block w-3 h-3 rounded-sm bg-amber-400" />
+                  Doanh thu (VNĐ)
+                </div>
               </div>
             </div>
+            {chartLoading ? (
+              <div className="flex items-center justify-center h-[240px]">
+                <div className="w-7 h-7 border-4 border-amber-400 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={monthlyRevenue} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <defs>
@@ -249,6 +262,7 @@ export default function DashboardPage() {
                 />
               </AreaChart>
             </ResponsiveContainer>
+            )}
           </div>
 
           {/* Pie chart */}
