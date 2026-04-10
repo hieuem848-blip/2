@@ -16,6 +16,7 @@ import adminOrderRoutes from "./routes/admin/adminOrderRoute.js";
 import adminCustomCakeRoutes from "./routes/admin/adminCustomCakeRoute.js";
 import adminChatRoutes from "./routes/admin/adminChatRoute.js";
 import adminDashboardRoutes from "./routes/admin/adminDashboardRoute.js";
+import adminInventoryRoutes from "./routes/admin/adminInventoryRoute.js";
 
 import productRoutes from "./routes/productRoute.js";
 import categoryRoutes from "./routes/categoryRoute.js";
@@ -76,6 +77,7 @@ app.use("/api/admin/orders",       adminOrderRoutes);
 app.use("/api/admin/custom-cakes", adminCustomCakeRoutes);
 app.use("/api/admin/chats",        adminChatRoutes);
 app.use("/api/admin/dashboards",   adminDashboardRoutes);
+app.use("/api/admin/inventory",    adminInventoryRoutes);
 
 connectDB().then(() => {
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
