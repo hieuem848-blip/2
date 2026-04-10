@@ -176,7 +176,7 @@ export default function CustomCakePage() {
             className={`w-full py-4 rounded-lg font-bold text-lg transition shadow-lg
               ${isLoading ? "bg-gray-400 cursor-not-allowed" : "bg-pink-600 text-white hover:bg-pink-700 active:scale-[0.98]"}`}
           >
-            {isLoading ? "🤖 AI đang phân tích..." : "Gửi ảnh cho AI"}
+            {isLoading ? "AI đang phân tích..." : "Gửi ảnh cho AI"}
           </button>
         </div>
 
