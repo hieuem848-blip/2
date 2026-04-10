@@ -14,32 +14,27 @@ export default function CustomCakePage() {
   const [files, setFiles] = useState<CakeFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-
-  const [cakeType, setCakeType] = useState("");
-  const [layers, setLayers] = useState("");
-  const [flavor, setFlavor] = useState("");
-  const [date, setDate] = useState("");
-  const [notes, setNotes] = useState("");
+  const [isLoading, setIsLoading] = useState(false); 
+  
+  // MỚI: State lưu kết quả trả về từ AI
+  const [aiResult, setAiResult] = useState<any>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const idRef = useRef(0);
 
   const showToast = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+    setTimeout(() => setToast(null), 3000);
   };
 
   const addFiles = useCallback((newFiles: File[]) => {
     const valid: CakeFile[] = [];
-
     newFiles.forEach((file) => {
       if (!file.type.startsWith("image/")) return;
-
       if (file.size > 10 * 1024 * 1024) {
         showToast(`Ảnh "${file.name}" vượt 10MB`);
         return;
       }
-
       valid.push({
         id: idRef.current++,
         file,
@@ -47,8 +42,9 @@ export default function CustomCakePage() {
         name: file.name,
       });
     });
-
     setFiles((prev) => [...prev, ...valid]);
+    // Reset kết quả AI cũ khi chọn ảnh mới
+    setAiResult(null); 
   }, []);
 
   const removeFile = (id: number) => {
@@ -57,6 +53,7 @@ export default function CustomCakePage() {
       if (file) URL.revokeObjectURL(file.preview);
       return prev.filter((f) => f.id !== id);
     });
+    setAiResult(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -65,169 +62,153 @@ export default function CustomCakePage() {
     addFiles([...e.dataTransfer.files]);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (files.length === 0) {
-      showToast("Vui lòng upload ít nhất 1 ảnh");
+      showToast("Vui lòng upload ít nhất 1 ảnh để AI phân tích");
       return;
     }
 
-    showToast("Đã gửi yêu cầu!");
+    setIsLoading(true);
+    setAiResult(null); // Reset kết quả cũ trước khi chạy AI mới
+    showToast("AI đang phân tích ảnh, vui lòng đợi...");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", files[0].file); 
+
+      // 1. Gọi AI
+      const aiResponse = await fetch("https://joyful-mirna-cubistically.ngrok-free.dev/predict_json", {
+        method: "POST",
+        headers: { "ngrok-skip-browser-warning": "true" },
+        body: formData,
+      });
+
+      if (!aiResponse.ok) throw new Error(`AI Server trả về lỗi: ${aiResponse.status}`);
+      
+      const aiData = await aiResponse.json();
+      console.log("Dữ liệu gốc từ AI:", aiData);
+      
+      // MỚI: Lưu kết quả AI vào state để hiển thị lên UI
+      setAiResult(aiData); 
+      showToast("AI phân tích thành công!");
+
+      // 2. Tạm thời MỞ COMMENT phần gửi BE để bạn xem kết quả AI trước.
+      // Khi nào AI hiển thị đúng trên giao diện rồi, bạn mới mở đoạn code BE ra nhé.
+      /*
+      const beResponse = await fetch("http://localhost:5000/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer: "Khách hàng Vãng Lai",
+          items: aiData.data,
+          note: "Đơn hàng tự động từ AI"
+        }),
+      });
+
+      if (beResponse.ok) {
+        showToast("Đặt hàng thành công!");
+        setFiles([]);
+      } else {
+        showToast("Lưu vào Database thất bại");
+      }
+      */
+
+    } catch (error: any) {
+      console.error(error);
+      showToast(`Lỗi: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* HERO */}
-      
-
+    <div className="min-h-screen bg-white pb-20">
       <section className="relative w-full h-[300px]">
-              <Image
-                src="/cakebg.png"
-                alt="Đặt bánh theo yêu cầu"
-                fill
-                className="object-cover"
-                priority
-              />
-      
-              {/* overlay */}
-              <div className="absolute inset-0 bg-black/40"></div>
-      
-              {/* text */}
-               <div className="absolute inset-0 flex flex-col justify-center items-center text-center text-white px-6">
-                <p className="text-xs tracking-[0.3em] mb-3">Witchy Bakery</p>
-                <h1 className="text-4xl font-bold">Đặt bánh theo yêu cầu</h1>
-              </div>
-            </section>
+        <Image src="/cakebg.png" alt="AI Cake Detection" fill className="object-cover" priority />
+        <div className="absolute inset-0 bg-black/40"></div>
+        <div className="absolute inset-0 flex flex-col justify-center items-center text-center text-white px-6">
+          <p className="text-xs tracking-[0.3em] mb-3 uppercase">Witchy Bakery AI</p>
+          <h1 className="text-4xl font-bold">Đặt Bánh Bằng AI</h1>
+          <p className="mt-2 text-sm opacity-80">Chụp ảnh mẫu bánh bạn thích, AI sẽ lo phần còn lại</p>
+        </div>
+      </section>
 
-      {/* MAIN */}
       <div className="max-w-3xl mx-auto px-4 py-10">
-        {/* UPLOAD */}
         <div
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
+          onClick={() => !isLoading && fileInputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition
-          ${dragOver ? "border-pink-500 bg-pink-50" : "border-gray-300"}`}
+          className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition 
+          ${dragOver ? "border-pink-500 bg-pink-50" : "border-gray-300"} 
+          ${isLoading ? "opacity-50 cursor-not-allowed" : "hover:border-pink-400"}`}
         >
           <input
-            type="file"
-            multiple
-            accept="image/*"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={(e) => {
-              addFiles([...(e.target.files ?? [])]);
-              e.target.value = "";
-            }}
+            type="file" multiple accept="image/*" ref={fileInputRef} className="hidden"
+            onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ""; }}
+            disabled={isLoading}
           />
-
-          <p className="text-lg font-semibold">📷 Upload ảnh bánh</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Kéo thả hoặc click để chọn
-          </p>
+          <p className="text-3xl mb-2">📸</p>
+          <p className="text-lg font-semibold text-gray-700">Tải ảnh mẫu bánh lên</p>
+          <p className="text-sm text-gray-500 mt-2">Kéo thả hoặc nhấn để chọn ảnh cho AI phân tích</p>
         </div>
 
-        {/* PREVIEW */}
         {files.length > 0 && (
-          <div className="mt-6">
-            <p className="mb-2 text-sm text-gray-600">
-              {files.length} ảnh đã chọn
-            </p>
-
+          <div className="mt-8">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {files.map((f) => (
-                <div
-                  key={f.id}
-                  className="relative rounded-lg overflow-hidden border"
-                >
-                  <img
-                    src={f.preview}
-                    className="w-full h-40 object-cover"
-                  />
-
+                <div key={f.id} className="relative rounded-lg overflow-hidden border group">
+                  <img src={f.preview} className="w-full h-40 object-cover" alt="preview" />
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeFile(f.id);
-                    }}
-                    className="absolute top-2 right-2 bg-black/70 text-white w-6 h-6 rounded-full"
-                  >
-                    ✕
-                  </button>
+                    onClick={(e) => { e.stopPropagation(); removeFile(f.id); }}
+                    className="absolute top-2 right-2 bg-black/70 text-white w-6 h-6 rounded-full hover:bg-red-500 transition"
+                  >✕</button>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* FORM */}
-        <div className="mt-10 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <select
-              value={cakeType}
-              onChange={(e) => setCakeType(e.target.value)}
-              className="border p-2 rounded"
-            >
-              <option value="">Loại bánh</option>
-              <option>Bánh kem </option>
-              <option>Bánh mini cake</option>
-              <option>Bánh sinh nhật</option>
-            </select>
-
-            <select
-              value={layers}
-              onChange={(e) => setLayers(e.target.value)}
-              className="border p-2 rounded"
-            >
-              <option value="">Size bánh</option>
-              <option>16cm</option>
-              <option>20cm</option>
-              <option>24cm</option>
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <select
-              value={flavor}
-              onChange={(e) => setFlavor(e.target.value)}
-              className="border p-2 rounded"
-            >
-              <option value="">Hương vị</option>
-              <option>Vani</option>
-              <option>Socola</option>
-              <option>Dâu</option>
-            </select>
-
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border p-2 rounded"
-            />
-          </div>
-
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Yêu cầu thêm..."
-            className="border p-2 rounded w-full"
-          />
-
+        <div className="mt-10">
           <button
             onClick={handleSubmit}
-            className="w-full bg-pink-600 text-white py-3 rounded-lg hover:bg-pink-700"
+            disabled={isLoading || files.length === 0}
+            className={`w-full py-4 rounded-lg font-bold text-lg transition shadow-lg
+              ${isLoading ? "bg-gray-400 cursor-not-allowed" : "bg-pink-600 text-white hover:bg-pink-700 active:scale-[0.98]"}`}
           >
-            Gửi yêu cầu
+            {isLoading ? "🤖 AI đang phân tích..." : "Gửi ảnh cho AI"}
           </button>
         </div>
+
+        {/* --- KHU VỰC MỚI: HIỂN THỊ KẾT QUẢ TỪ AI --- */}
+        {aiResult && (
+          <div className="mt-8 p-6 bg-pink-50 rounded-xl border border-pink-200">
+            <h3 className="text-xl font-bold text-pink-800 mb-4 flex items-center gap-2">
+              ✨ Kết quả từ AI
+            </h3>
+            
+            {/* Tùy thuộc vào cấu trúc JSON trả về của AI, bạn sửa đoạn này. 
+                Giả sử AI trả về: { "loai_banh": "Bánh kem socola", "topping": ["dâu", "nến"] } */}
+            <div className="space-y-3">
+              <p className="text-gray-700">
+                <strong>Dữ liệu thô (JSON):</strong>
+              </p>
+              <pre className="bg-gray-800 text-green-400 p-4 rounded-lg overflow-auto text-sm">
+                {JSON.stringify(aiResult, null, 2)}
+              </pre>
+            </div>
+
+            {/* Nút giả lập để xác nhận đặt hàng sau khi xem kết quả */}
+            <button className="mt-6 w-full py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700">
+              Xác nhận Đặt Hàng với thông tin này
+            </button>
+          </div>
+        )}
+
       </div>
 
-      {/* TOAST */}
       {toast && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 bg-black text-white px-5 py-2 rounded-full text-sm">
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full text-sm shadow-2xl z-50">
           {toast}
         </div>
       )}
