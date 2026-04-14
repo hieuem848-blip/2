@@ -112,22 +112,51 @@ export const adminDashboardApi = {
 };
 
 // ── INVENTORY ────────────────────────────────────────────────────────────────
+export type IngredientCategory = "bot_duong" | "chat_long" | "trung_sua" | "trang_tri" | "bao_bi" | "khac";
+
+export const INGREDIENT_CATEGORIES: Record<IngredientCategory, string> = {
+  bot_duong: "Bột & Đường",
+  chat_long: "Chất lỏng & Dầu",
+  trung_sua: "Trứng & Sữa",
+  trang_tri: "Trang trí & Hương liệu",
+  bao_bi: "Bao bì & Dụng cụ",
+  khac: "Khác",
+};
+
 export interface Ingredient {
   _id: string;
   name: string;
+  category: IngredientCategory;
   unit: string;
   stock: number;
   minThreshold: number;
+  costPrice: number;
+  supplier: string;
+  note: string;
   createdAt: string;
+  // virtual fields from backend
+  nearestExpiry?: string | null;
+  expiringBatchNote?: string | null;
+  isExpiringSoon?: boolean;
+  isLowStock?: boolean;
 }
+
+export type MovementType = "import" | "export" | "spoilage" | "adjust";
 
 export interface InventoryLog {
   _id: string;
-  ingredient: { _id: string; name: string; unit: string } | string;
+  ingredient: { _id: string; name: string; unit: string; category: string } | string;
   ingredientName: string;
-  type: "import" | "export" | "spoilage";
+  ingredientUnit: string;
+  type: MovementType;
   quantity: number;
+  costPrice: number;
+  supplier: string;
+  expiryDate?: string | null;
+  batchNote: string;
   reason: string;
+  stockBefore: number;
+  stockAfter: number;
   createdBy?: { _id: string; displayName: string } | string;
   createdAt: string;
 }
@@ -135,33 +164,110 @@ export interface InventoryLog {
 export interface InventoryStats {
   total: number;
   lowStock: number;
+  totalValue: number;
   todayTransactions: number;
+  expiringSoonCount: number;
+  monthly: { import: number; export: number; spoilage: number };
+}
+
+export interface ExpiryAlert {
+  ingredient: { _id: string; name: string; unit: string; stock: number };
+  batches: { _id: string; quantity: number; expiryDate: string; batchNote: string; daysLeft: number }[];
+}
+
+export interface LogsResponse {
+  logs: InventoryLog[];
+  total: number;
+  page: number;
+  totalPages: number;
 }
 
 export const adminInventoryApi = {
   getStats: () => adminFetch<InventoryStats>("/admin/inventory/stats"),
-  getAll: () => adminFetch<{ ingredients: Ingredient[] }>("/admin/inventory"),
-  create: (data: { name: string; unit: string; stock: number; minThreshold: number }) =>
-    adminFetch<{ ingredient: Ingredient }>("/admin/inventory", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  update: (id: string, data: { name?: string; unit?: string; minThreshold?: number }) =>
+
+  getAll: (params?: { category?: string; lowStock?: string; search?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.category) q.set("category", params.category);
+    if (params?.lowStock) q.set("lowStock", params.lowStock);
+    if (params?.search) q.set("search", params.search);
+    const qs = q.toString();
+    return adminFetch<{ ingredients: Ingredient[] }>(`/admin/inventory${qs ? `?${qs}` : ""}`);
+  },
+
+  create: (data: {
+    name: string; unit: string; category?: string; stock?: number;
+    minThreshold?: number; costPrice?: number; supplier?: string; note?: string;
+  }) => adminFetch<{ ingredient: Ingredient }>("/admin/inventory", {
+    method: "POST", body: JSON.stringify(data),
+  }),
+
+  update: (id: string, data: Partial<Omit<Ingredient, "_id" | "createdAt" | "stock">>) =>
     adminFetch<{ ingredient: Ingredient }>(`/admin/inventory/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
+      method: "PUT", body: JSON.stringify(data),
     }),
+
   delete: (id: string) => adminFetch(`/admin/inventory/${id}`, { method: "DELETE" }),
-  movement: (
-    id: string,
-    data: { type: "import" | "export" | "spoilage"; quantity: number; reason?: string }
-  ) =>
-    adminFetch<{ ingredient: Ingredient; log: InventoryLog }>(`/admin/inventory/${id}/movement`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  getLogs: (limit?: number) =>
-    adminFetch<{ logs: InventoryLog[] }>(`/admin/inventory/logs${limit ? `?limit=${limit}` : ""}`),
+
+  movement: (id: string, data: {
+    type: MovementType; quantity: number; reason?: string;
+    costPrice?: number; supplier?: string; expiryDate?: string; batchNote?: string;
+  }) => adminFetch<{ ingredient: Ingredient; log: InventoryLog }>(`/admin/inventory/${id}/movement`, {
+    method: "POST", body: JSON.stringify(data),
+  }),
+
+  getLogs: (params?: {
+    ingredientId?: string; type?: string; fromDate?: string; toDate?: string;
+    page?: number; limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.ingredientId) q.set("ingredientId", params.ingredientId);
+    if (params?.type) q.set("type", params.type);
+    if (params?.fromDate) q.set("fromDate", params.fromDate);
+    if (params?.toDate) q.set("toDate", params.toDate);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.limit) q.set("limit", String(params.limit));
+    return adminFetch<LogsResponse>(`/admin/inventory/logs?${q}`);
+  },
+
+  getExpiryAlerts: () => adminFetch<{ alerts: ExpiryAlert[] }>("/admin/inventory/expiry-alerts"),
+
+  exportCSV: (token: string) => {
+    const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api"}/admin/inventory/export-csv`;
+    const a = document.createElement("a");
+    a.href = url + `?token=${token}`;
+    // Use Authorization header via fetch instead
+    adminFetch<Blob>("/admin/inventory/export-csv").then(() => {});
+    // Direct download approach:
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = `ton-kho-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+      });
+  },
+
+  exportLogsCSV: (token: string, params?: { fromDate?: string; toDate?: string; type?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.fromDate) q.set("fromDate", params.fromDate);
+    if (params?.toDate) q.set("toDate", params.toDate);
+    if (params?.type) q.set("type", params.type);
+    const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api";
+    const url = `${BASE}/admin/inventory/export-logs-csv?${q}`;
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.blob())
+      .then((blob) => {
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = `lich-su-kho-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(blobUrl);
+      });
+  },
 };
 
 // ── PRODUCTS ─────────────────────────────────────────────────────────────────

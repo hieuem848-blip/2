@@ -1,143 +1,202 @@
-// app/admin/inventory/page.tsx
 'use client';
-
 import { useState, useEffect, useCallback } from 'react';
 import AdminShell from '../components/AdminShell';
 import {
-  adminInventoryApi,
-  Ingredient,
-  InventoryLog,
-  InventoryStats,
+  adminInventoryApi, getAdminToken,
+  Ingredient, InventoryLog, InventoryStats, ExpiryAlert, MovementType,
+  INGREDIENT_CATEGORIES, IngredientCategory, LogsResponse,
 } from '../../lib/adminApi';
 import {
-  Package,
-  Plus,
-  Minus,
-  Trash2,
-  AlertCircle,
-  X,
-  History,
-  RefreshCw,
-  Pencil,
+  Package, Plus, Minus, Trash2, AlertCircle, X, History,
+  RefreshCw, Pencil, Download, Search, Filter, ChevronLeft,
+  ChevronRight, AlertTriangle, TrendingDown, DollarSign, Calendar,
 } from 'lucide-react';
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+const fmtVND = (n: number) =>
+  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
+const fmtDate = (d: string | Date | null | undefined) =>
+  d ? new Date(d).toLocaleDateString('vi-VN') : '—';
+const fmtDateTime = (d: string | Date) =>
+  new Date(d).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const today = () => new Date().toISOString().slice(0, 10);
+
+const TYPE_META: Record<MovementType, { label: string; badge: string; btn: string }> = {
+  import:   { label: 'Nhập kho',       badge: 'bg-green-100 text-green-800',   btn: 'bg-green-500 hover:bg-green-600' },
+  export:   { label: 'Xuất kho',       badge: 'bg-blue-100 text-blue-800',     btn: 'bg-blue-500 hover:bg-blue-600' },
+  spoilage: { label: 'Hủy/Hao hụt',   badge: 'bg-red-100 text-red-800',       btn: 'bg-red-500 hover:bg-red-600' },
+  adjust:   { label: 'Điều chỉnh',    badge: 'bg-purple-100 text-purple-800',  btn: 'bg-purple-500 hover:bg-purple-600' },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function InventoryPage() {
+  const [tab, setTab] = useState<'stock' | 'logs' | 'expiry'>('stock');
+
+  // ── data ──
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [logs, setLogs] = useState<InventoryLog[]>([]);
   const [stats, setStats] = useState<InventoryStats | null>(null);
+  const [logsData, setLogsData] = useState<LogsResponse>({ logs: [], total: 0, page: 1, totalPages: 1 });
+  const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [logsLoading, setLogsLoading] = useState(false);
 
-  const [showAddIngredient, setShowAddIngredient] = useState(false);
-  const [newIngredient, setNewIngredient] = useState({ name: '', unit: '', stock: 0, minThreshold: 0 });
+  // ── filters ──
+  const [search, setSearch] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterLowStock, setFilterLowStock] = useState(false);
+  const [logFilter, setLogFilter] = useState({ type: 'all', fromDate: '', toDate: '', ingredientId: '' });
+  const [logPage, setLogPage] = useState(1);
 
-  const [editIngredient, setEditIngredient] = useState<Ingredient | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', unit: '', minThreshold: 0 });
+  // ── add ingredient ──
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({ name: '', unit: '', category: 'khac' as IngredientCategory, stock: '', minThreshold: '', costPrice: '', supplier: '', note: '' });
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
-  const [modalType, setModalType] = useState<'import' | 'export' | 'spoilage'>('import');
-  const [quantity, setQuantity] = useState<number>(0);
-  const [reason, setReason] = useState('');
+  // ── edit ingredient ──
+  const [editIng, setEditIng] = useState<Ingredient | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', unit: '', category: 'khac' as IngredientCategory, minThreshold: '', costPrice: '', supplier: '', note: '' });
 
+  // ── movement modal ──
+  const [mvModal, setMvModal] = useState(false);
+  const [mvIng, setMvIng] = useState<Ingredient | null>(null);
+  const [mvType, setMvType] = useState<MovementType>('import');
+  const [mvForm, setMvForm] = useState({ quantity: '', reason: '', costPrice: '', supplier: '', expiryDate: '', batchNote: '' });
+
+  // ── ui ──
   const [error, setError] = useState('');
-  const [successMsg, setSuccessMsg] = useState('');
+  const [toast, setToast] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const showSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 2500);
-  };
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+
+  // ── loaders ──
+  const loadIngredients = useCallback(async () => {
+    const res = await adminInventoryApi.getAll({
+      search: search || undefined,
+      category: filterCategory || undefined,
+      lowStock: filterLowStock ? '1' : undefined,
+    });
+    setIngredients(res.ingredients);
+  }, [search, filterCategory, filterLowStock]);
+
+  const loadStats = useCallback(async () => {
+    const s = await adminInventoryApi.getStats();
+    setStats(s);
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    try {
+      const res = await adminInventoryApi.getLogs({
+        type: logFilter.type !== 'all' ? logFilter.type : undefined,
+        fromDate: logFilter.fromDate || undefined,
+        toDate: logFilter.toDate || undefined,
+        ingredientId: logFilter.ingredientId || undefined,
+        page: logPage,
+        limit: 20,
+      });
+      setLogsData(res);
+    } finally { setLogsLoading(false); }
+  }, [logFilter, logPage]);
+
+  const loadExpiry = useCallback(async () => {
+    const res = await adminInventoryApi.getExpiryAlerts();
+    setExpiryAlerts(res.alerts);
+  }, []);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    try {
-      const [ingredientsRes, logsRes, statsRes] = await Promise.all([
-        adminInventoryApi.getAll(),
-        adminInventoryApi.getLogs(50),
-        adminInventoryApi.getStats(),
-      ]);
-      setIngredients(ingredientsRes.ingredients);
-      setLogs(logsRes.logs);
-      setStats(statsRes);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    try { await Promise.all([loadIngredients(), loadStats(), loadExpiry()]); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [loadIngredients, loadStats, loadExpiry]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab, loadLogs]);
 
-  const handleAddIngredient = async () => {
-    if (!newIngredient.name || !newIngredient.unit) { setError('Vui lòng điền đầy đủ tên và đơn vị'); return; }
+  // ── add ──
+  const handleAdd = async () => {
+    if (!addForm.name.trim() || !addForm.unit.trim()) { setError('Vui lòng điền tên và đơn vị'); return; }
     setSubmitting(true); setError('');
     try {
-      await adminInventoryApi.create(newIngredient);
+      await adminInventoryApi.create({
+        name: addForm.name.trim(), unit: addForm.unit.trim(), category: addForm.category,
+        stock: parseFloat(addForm.stock) || 0, minThreshold: parseFloat(addForm.minThreshold) || 0,
+        costPrice: parseFloat(addForm.costPrice) || 0, supplier: addForm.supplier, note: addForm.note,
+      });
       await loadAll();
-      setShowAddIngredient(false);
-      setNewIngredient({ name: '', unit: '', stock: 0, minThreshold: 0 });
-      showSuccess('Đã thêm nguyên liệu mới!');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Lỗi khi thêm nguyên liệu');
-    } finally { setSubmitting(false); }
+      setShowAdd(false);
+      setAddForm({ name: '', unit: '', category: 'khac', stock: '', minThreshold: '', costPrice: '', supplier: '', note: '' });
+      showToast('✅ Đã thêm nguyên liệu!');
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Lỗi'); }
+    finally { setSubmitting(false); }
   };
 
-  const handleEditIngredient = async () => {
-    if (!editIngredient) return;
-    if (!editForm.name || !editForm.unit) { setError('Vui lòng điền đầy đủ tên và đơn vị'); return; }
+  // ── edit ──
+  const openEdit = (ing: Ingredient) => {
+    setEditIng(ing);
+    setEditForm({ name: ing.name, unit: ing.unit, category: ing.category, minThreshold: String(ing.minThreshold), costPrice: String(ing.costPrice), supplier: ing.supplier, note: ing.note });
+    setError('');
+  };
+  const handleEdit = async () => {
+    if (!editIng) return;
+    if (!editForm.name.trim() || !editForm.unit.trim()) { setError('Vui lòng điền tên và đơn vị'); return; }
     setSubmitting(true); setError('');
     try {
-      await adminInventoryApi.update(editIngredient._id, editForm);
+      await adminInventoryApi.update(editIng._id, {
+        name: editForm.name.trim(), unit: editForm.unit.trim(), category: editForm.category,
+        minThreshold: parseFloat(editForm.minThreshold) || 0,
+        costPrice: parseFloat(editForm.costPrice) || 0,
+        supplier: editForm.supplier, note: editForm.note,
+      });
       await loadAll();
-      setEditIngredient(null);
-      showSuccess('Đã cập nhật nguyên liệu!');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Lỗi khi cập nhật');
-    } finally { setSubmitting(false); }
+      setEditIng(null);
+      showToast('✅ Đã cập nhật!');
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Lỗi'); }
+    finally { setSubmitting(false); }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Xoá nguyên liệu "${name}"?`)) return;
-    try {
-      await adminInventoryApi.delete(id);
-      await loadAll();
-      showSuccess(`Đã xoá "${name}"`);
-    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Lỗi khi xoá'); }
+  // ── delete ──
+  const handleDelete = async (ing: Ingredient) => {
+    if (!confirm(`Xoá nguyên liệu "${ing.name}"?`)) return;
+    try { await adminInventoryApi.delete(ing._id); await loadAll(); showToast(`🗑 Đã xoá "${ing.name}"`); }
+    catch (e: unknown) { alert(e instanceof Error ? e.message : 'Lỗi'); }
   };
 
-  const openModal = (ingredient: Ingredient, type: 'import' | 'export' | 'spoilage') => {
-    setSelectedIngredient(ingredient); setModalType(type);
-    setQuantity(0); setReason(''); setError(''); setModalOpen(true);
+  // ── movement ──
+  const openMovement = (ing: Ingredient, type: MovementType) => {
+    setMvIng(ing); setMvType(type);
+    setMvForm({ quantity: '', reason: '', costPrice: String(ing.costPrice || ''), supplier: ing.supplier || '', expiryDate: '', batchNote: '' });
+    setError(''); setMvModal(true);
   };
-
-  const handleAction = async () => {
-    if (!selectedIngredient) return;
-    if (quantity <= 0) { setError('Số lượng phải lớn hơn 0'); return; }
+  const handleMovement = async () => {
+    if (!mvIng) return;
+    const qty = parseFloat(mvForm.quantity);
+    if (!qty || qty <= 0) { setError('Số lượng phải lớn hơn 0'); return; }
+    if (mvType === 'spoilage' && !mvForm.reason.trim()) { setError('Vui lòng nhập lý do hủy'); return; }
     setSubmitting(true); setError('');
     try {
-      await adminInventoryApi.movement(selectedIngredient._id, { type: modalType, quantity, reason });
-      await loadAll();
-      setModalOpen(false); setSelectedIngredient(null);
-      const label = modalType === 'import' ? 'Nhập' : modalType === 'export' ? 'Xuất' : 'Hủy';
-      showSuccess(`${label} ${quantity} ${selectedIngredient.unit} ${selectedIngredient.name} thành công`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Lỗi khi thực hiện');
-    } finally { setSubmitting(false); }
+      await adminInventoryApi.movement(mvIng._id, {
+        type: mvType, quantity: qty, reason: mvForm.reason,
+        costPrice: mvType === 'import' ? parseFloat(mvForm.costPrice) || 0 : undefined,
+        supplier: mvType === 'import' ? mvForm.supplier : undefined,
+        expiryDate: mvType === 'import' && mvForm.expiryDate ? mvForm.expiryDate : undefined,
+        batchNote: mvForm.batchNote || undefined,
+      });
+      await loadAll(); if (tab === 'logs') await loadLogs();
+      setMvModal(false); setMvIng(null);
+      showToast(`✅ ${TYPE_META[mvType].label} ${qty} ${mvIng.unit} ${mvIng.name}`);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Lỗi'); }
+    finally { setSubmitting(false); }
   };
 
-  const getLogBadge = (type: string) => ({
-    import: 'bg-green-100 text-green-800',
-    export: 'bg-blue-100 text-blue-800',
-    spoilage: 'bg-red-100 text-red-800',
-  }[type] ?? 'bg-gray-100 text-gray-800');
+  // ── export ──
+  const handleExportStock = () => { const t = getAdminToken(); if (t) adminInventoryApi.exportCSV(t); };
+  const handleExportLogs = () => {
+    const t = getAdminToken();
+    if (t) adminInventoryApi.exportLogsCSV(t, { fromDate: logFilter.fromDate, toDate: logFilter.toDate, type: logFilter.type !== 'all' ? logFilter.type : undefined });
+  };
 
-  const getLogLabel = (type: string) => ({ import: 'Nhập kho', export: 'Xuất kho', spoilage: 'Hủy / Hao hụt' }[type] ?? '');
-  const getLogIcon = (type: string) => type === 'import'
-    ? <Plus className="w-3 h-3" />
-    : type === 'export'
-    ? <Minus className="w-3 h-3" />
-    : <Trash2 className="w-3 h-3" />;
-
+  // ─────────────────────────────────────────────────────────────────────────
   if (loading) return (
     <AdminShell>
       <div className="flex items-center justify-center h-64">
@@ -146,238 +205,595 @@ export default function InventoryPage() {
     </AdminShell>
   );
 
+  const alertCount = (stats?.expiringSoonCount ?? 0) + (stats?.lowStock ?? 0);
+
   return (
     <AdminShell>
       <div className="p-6 bg-gray-50 min-h-screen">
 
-        {successMsg && (
-          <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">
-            {successMsg}
+        {/* Toast */}
+        {toast && (
+          <div className="fixed top-4 right-4 z-50 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl text-sm font-medium">
+            {toast}
           </div>
         )}
 
+        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Quản lý kho</h1>
-            <p className="text-gray-500 text-sm mt-1">Nguyên liệu, nhập / xuất / hủy kho</p>
+            <h1 className="text-2xl font-bold text-gray-800">Quản lý kho nguyên liệu</h1>
+            <p className="text-gray-500 text-sm mt-1">Theo dõi tồn kho, nhập xuất, hạn sử dụng và chi phí</p>
           </div>
-          <button onClick={loadAll} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition">
-            <RefreshCw className="w-4 h-4" /> Làm mới
-          </button>
+          <div className="flex gap-2">
+            <button onClick={loadAll} className="flex items-center gap-1.5 text-sm text-gray-500 border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition">
+              <RefreshCw className="w-4 h-4" /> Làm mới
+            </button>
+            <button onClick={handleExportStock} className="flex items-center gap-1.5 text-sm text-white bg-green-600 hover:bg-green-700 rounded-lg px-3 py-2 transition">
+              <Download className="w-4 h-4" /> Xuất Excel
+            </button>
+          </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Stats cards */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
           {[
-            { label: 'Tổng nguyên liệu', value: stats?.total ?? ingredients.length, icon: <Package className="w-9 h-9 text-purple-400" /> },
-            { label: 'Sắp hết hàng', value: stats?.lowStock ?? ingredients.filter(i => i.stock <= i.minThreshold).length, icon: <AlertCircle className="w-9 h-9 text-orange-400" />, red: true },
-            { label: 'Giao dịch hôm nay', value: stats?.todayTransactions ?? 0, icon: <History className="w-9 h-9 text-blue-400" /> },
-          ].map(({ label, value, icon, red }) => (
-            <div key={label} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center justify-between">
-              <div>
-                <p className="text-gray-500 text-sm">{label}</p>
-                <p className={`text-2xl font-bold ${red ? 'text-orange-500' : 'text-gray-800'}`}>{value}</p>
-              </div>
+            { label: 'Tổng NVL', value: stats?.total ?? 0, icon: <Package className="w-6 h-6 text-purple-400" />, color: 'text-gray-800' },
+            { label: 'Sắp hết hàng', value: stats?.lowStock ?? 0, icon: <TrendingDown className="w-6 h-6 text-orange-400" />, color: 'text-orange-500' },
+            { label: 'Sắp hết hạn', value: stats?.expiringSoonCount ?? 0, icon: <AlertTriangle className="w-6 h-6 text-red-400" />, color: 'text-red-500' },
+            { label: 'GD hôm nay', value: stats?.todayTransactions ?? 0, icon: <History className="w-6 h-6 text-blue-400" />, color: 'text-blue-600' },
+            { label: 'Giá trị tồn kho', value: fmtVND(stats?.totalValue ?? 0), icon: <DollarSign className="w-6 h-6 text-emerald-400" />, color: 'text-emerald-600', wide: true },
+          ].map(({ label, value, icon, color, wide }) => (
+            <div key={label} className={`bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3 shadow-sm ${wide ? 'col-span-2 md:col-span-1' : ''}`}>
               {icon}
+              <div>
+                <p className="text-xs text-gray-400">{label}</p>
+                <p className={`font-bold text-base ${color}`}>{value}</p>
+              </div>
             </div>
           ))}
         </div>
 
-        {/* Action bar */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 mb-6 p-4 flex justify-between items-center">
-          <button onClick={() => { setShowAddIngredient(true); setError(''); }} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition flex items-center gap-2 text-sm font-medium">
-            <Plus className="w-4 h-4" /> Thêm nguyên liệu
-          </button>
-          <p className="text-xs text-gray-400">⚠ Hàng đỏ: tồn kho dưới ngưỡng cảnh báo</p>
+        {/* Tabs */}
+        <div className="flex gap-1 mb-5 bg-white rounded-xl border border-gray-100 p-1 shadow-sm w-fit">
+          {([
+            { key: 'stock', label: 'Tồn kho', icon: <Package className="w-4 h-4" /> },
+            { key: 'logs', label: 'Lịch sử giao dịch', icon: <History className="w-4 h-4" /> },
+            { key: 'expiry', label: `Hạn sử dụng${alertCount > 0 ? ` (${alertCount})` : ''}`, icon: <Calendar className="w-4 h-4" /> },
+          ] as const).map(({ key, label, icon }) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition ${tab === key ? 'bg-purple-600 text-white shadow' : 'text-gray-600 hover:bg-gray-50'}`}>
+              {icon} {label}
+            </button>
+          ))}
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100">
-              <thead className="bg-gray-50">
-                <tr>
-                  {['Nguyên liệu', 'Đơn vị', 'Tồn kho', 'Ngưỡng cảnh báo', 'Thao tác'].map(h => (
-                    <th key={h} className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {ingredients.length === 0 ? (
-                  <tr><td colSpan={5} className="px-6 py-10 text-center text-gray-400">Chưa có nguyên liệu nào. Hãy thêm mới!</td></tr>
-                ) : ingredients.map(ing => {
-                  const low = ing.stock <= ing.minThreshold;
-                  return (
-                    <tr key={ing._id} className={`hover:bg-gray-50 ${low ? 'bg-red-50' : ''}`}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          {low && <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />}
-                          <span className={`font-medium ${low ? 'text-red-700' : 'text-gray-900'}`}>{ing.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-gray-600 text-sm">{ing.unit}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`font-semibold text-lg ${low ? 'text-red-600' : 'text-gray-900'}`}>{ing.stock}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-gray-500 text-sm">{ing.minThreshold}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <button onClick={() => openModal(ing, 'import')} className="bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600 transition text-xs font-medium flex items-center gap-1">
-                            <Plus className="w-3 h-3" /> Nhập
-                          </button>
-                          <button onClick={() => openModal(ing, 'export')} className="bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:bg-blue-600 transition text-xs font-medium flex items-center gap-1">
-                            <Minus className="w-3 h-3" /> Xuất
-                          </button>
-                          <button onClick={() => openModal(ing, 'spoilage')} className="bg-orange-500 text-white px-3 py-1.5 rounded-lg hover:bg-orange-600 transition text-xs font-medium flex items-center gap-1">
-                            <Trash2 className="w-3 h-3" /> Hủy
-                          </button>
-                          <button onClick={() => { setEditIngredient(ing); setEditForm({ name: ing.name, unit: ing.unit, minThreshold: ing.minThreshold }); setError(''); }} className="bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 transition text-xs font-medium flex items-center gap-1">
-                            <Pencil className="w-3 h-3" /> Sửa
-                          </button>
-                          <button onClick={() => handleDelete(ing._id, ing.name)} className="text-red-400 hover:text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-50 transition">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+        {/* ════════════════ TAB: STOCK ════════════════ */}
+        {tab === 'stock' && (
+          <>
+            {/* Filters + Add button */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
+              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <input
+                  type="text" placeholder="Tìm nguyên liệu..." value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full text-sm outline-none"
+                />
+              </div>
+              <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-200">
+                <option value="">Tất cả danh mục</option>
+                {(Object.entries(INGREDIENT_CATEGORIES) as [IngredientCategory, string][]).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
+                <input type="checkbox" checked={filterLowStock} onChange={e => setFilterLowStock(e.target.checked)} className="accent-purple-600" />
+                Chỉ hiện sắp hết
+              </label>
+              <button onClick={() => { setShowAdd(true); setError(''); }}
+                className="ml-auto bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition flex items-center gap-1.5 text-sm font-medium">
+                <Plus className="w-4 h-4" /> Thêm nguyên liệu
+              </button>
+            </div>
+
+            {/* Ingredient table */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-100">
+                  <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <tr>
+                      {['Nguyên liệu', 'Danh mục', 'Tồn kho', 'Giá nhập', 'Giá trị tồn', 'Nhà CC', 'Hạn gần nhất', 'Thao tác'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left whitespace-nowrap">{h}</th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {ingredients.length === 0 ? (
+                      <tr><td colSpan={8} className="py-12 text-center text-gray-400">Chưa có nguyên liệu nào</td></tr>
+                    ) : ingredients.map(ing => {
+                      const low = ing.isLowStock;
+                      const expSoon = ing.isExpiringSoon;
+                      return (
+                        <tr key={ing._id} className={`hover:bg-gray-50 ${low ? 'bg-red-50' : expSoon ? 'bg-yellow-50' : ''}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              {low && <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" title="Sắp hết hàng" />}
+                              {expSoon && <AlertTriangle className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" title="Sắp hết hạn" />}
+                              <div>
+                                <p className={`font-medium text-sm ${low ? 'text-red-700' : 'text-gray-900'}`}>{ing.name}</p>
+                                {ing.note && <p className="text-xs text-gray-400 truncate max-w-[140px]">{ing.note}</p>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                              {INGREDIENT_CATEGORIES[ing.category] || ing.category}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className={`font-bold ${low ? 'text-red-600' : 'text-gray-800'}`}>{ing.stock}</span>
+                            <span className="text-gray-400 text-xs ml-1">{ing.unit}</span>
+                            {ing.minThreshold > 0 && (
+                              <p className="text-xs text-gray-400">min: {ing.minThreshold}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                            {ing.costPrice > 0 ? fmtVND(ing.costPrice) : <span className="text-gray-300">—</span>}
+                            <span className="text-xs text-gray-400">/{ing.unit}</span>
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-emerald-700">
+                            {ing.costPrice > 0 ? fmtVND(ing.stock * ing.costPrice) : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-500">
+                            {ing.supplier || <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {ing.nearestExpiry ? (
+                              <span className={`text-xs font-medium ${ing.isExpiringSoon ? 'text-red-600' : 'text-gray-600'}`}>
+                                {fmtDate(ing.nearestExpiry)}
+                                {ing.isExpiringSoon && ' ⚠️'}
+                              </span>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1 flex-wrap min-w-[200px]">
+                              <button onClick={() => openMovement(ing, 'import')} className="bg-green-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium hover:bg-green-600 flex items-center gap-0.5"><Plus className="w-3 h-3" />Nhập</button>
+                              <button onClick={() => openMovement(ing, 'export')} className="bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium hover:bg-blue-600 flex items-center gap-0.5"><Minus className="w-3 h-3" />Xuất</button>
+                              <button onClick={() => openMovement(ing, 'spoilage')} className="bg-orange-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium hover:bg-orange-600 flex items-center gap-0.5"><Trash2 className="w-3 h-3" />Hủy</button>
+                              <button onClick={() => openMovement(ing, 'adjust')} className="bg-purple-500 text-white px-2.5 py-1 rounded-lg text-xs font-medium hover:bg-purple-600">Kiểm kê</button>
+                              <button onClick={() => openEdit(ing)} className="bg-gray-100 text-gray-600 px-2.5 py-1 rounded-lg text-xs font-medium hover:bg-gray-200 flex items-center gap-0.5"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={() => handleDelete(ing)} className="text-red-400 hover:text-red-600 px-1.5 py-1 rounded hover:bg-red-50"><X className="w-4 h-4" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
 
-        {/* Logs */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
-              <History className="w-5 h-5 text-gray-400" /> Lịch sử nhập / xuất / hủy gần đây
-            </h2>
-            <span className="text-xs text-gray-400">{logs.length} giao dịch</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-100">
-              <thead className="bg-gray-50">
-                <tr>
-                  {['Thời gian', 'Nguyên liệu', 'Loại', 'Số lượng', 'Lý do', 'Người thực hiện'].map(h => (
-                    <th key={h} className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+        {/* ════════════════ TAB: LOGS ════════════════ */}
+        {tab === 'logs' && (
+          <>
+            {/* Log filters */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Loại GD</label>
+                <select value={logFilter.type} onChange={e => { setLogFilter(f => ({...f, type: e.target.value})); setLogPage(1); }}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-200">
+                  <option value="all">Tất cả</option>
+                  {(Object.entries(TYPE_META) as [MovementType, { label: string }][]).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {logs.length === 0 ? (
-                  <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-400 text-sm">Chưa có giao dịch nào</td></tr>
-                ) : logs.map(log => (
-                  <tr key={log._id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(log.createdAt).toLocaleString('vi-VN')}</td>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-800 text-sm">{log.ingredientName}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getLogBadge(log.type)}`}>
-                        {getLogIcon(log.type)} {getLogLabel(log.type)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700 text-sm font-medium">
-                      {log.quantity}
-                      {typeof log.ingredient === 'object' && log.ingredient !== null ? ` ${(log.ingredient as { unit: string }).unit}` : ''}
-                    </td>
-                    <td className="px-6 py-4 text-gray-500 text-sm max-w-xs truncate">{log.reason || '—'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500 text-sm">
-                      {typeof log.createdBy === 'object' && log.createdBy !== null ? (log.createdBy as { displayName: string }).displayName : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Modal Thêm */}
-        {showAddIngredient && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <div className="flex justify-between items-center mb-5">
-                <h2 className="text-lg font-bold">Thêm nguyên liệu mới</h2>
-                <button onClick={() => setShowAddIngredient(false)}><X className="w-5 h-5 text-gray-400" /></button>
+                </select>
               </div>
-              <div className="space-y-3">
-                {([['name','Tên nguyên liệu *','VD: Bột mì','text'],['unit','Đơn vị *','kg, lít, quả...','text'],['stock','Tồn kho ban đầu','0','number'],['minThreshold','Ngưỡng cảnh báo','0','number']] as [keyof typeof newIngredient, string, string, string][]).map(([key,label,ph,type]) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-                    <input type={type} placeholder={ph} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                      value={newIngredient[key]}
-                      onChange={e => setNewIngredient({...newIngredient, [key]: type==='number' ? parseFloat(e.target.value)||0 : e.target.value})} />
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Từ ngày</label>
+                <input type="date" value={logFilter.fromDate} onChange={e => { setLogFilter(f => ({...f, fromDate: e.target.value})); setLogPage(1); }}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-200" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Đến ngày</label>
+                <input type="date" value={logFilter.toDate} onChange={e => { setLogFilter(f => ({...f, toDate: e.target.value})); setLogPage(1); }}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-200" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Nguyên liệu</label>
+                <select value={logFilter.ingredientId} onChange={e => { setLogFilter(f => ({...f, ingredientId: e.target.value})); setLogPage(1); }}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-200 max-w-[180px]">
+                  <option value="">Tất cả</option>
+                  {ingredients.map(i => <option key={i._id} value={i._id}>{i.name}</option>)}
+                </select>
+              </div>
+              <button onClick={loadLogs} className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 text-gray-600 transition">
+                <Filter className="w-3.5 h-3.5" /> Lọc
+              </button>
+              <button onClick={handleExportLogs} className="ml-auto flex items-center gap-1.5 text-sm bg-green-600 text-white rounded-lg px-3 py-1.5 hover:bg-green-700 transition">
+                <Download className="w-3.5 h-3.5" /> Xuất CSV
+              </button>
+            </div>
+
+            {/* Logs table */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              {logsLoading ? (
+                <div className="flex justify-center py-16"><div className="w-7 h-7 border-4 border-purple-400 border-t-transparent rounded-full animate-spin" /></div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-100">
+                      <thead className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <tr>
+                          {['Thời gian','Nguyên liệu','Loại','Số lượng','Tồn trước → sau','Giá nhập','Nhà CC','HSD lô','Lý do / Ghi chú','Người TH'].map(h => (
+                            <th key={h} className="px-3 py-3 text-left whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 text-sm">
+                        {logsData.logs.length === 0 ? (
+                          <tr><td colSpan={10} className="py-12 text-center text-gray-400">Không có giao dịch nào</td></tr>
+                        ) : logsData.logs.map(log => (
+                          <tr key={log._id} className="hover:bg-gray-50">
+                            <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">{fmtDateTime(log.createdAt)}</td>
+                            <td className="px-3 py-3 whitespace-nowrap font-medium text-gray-800">{log.ingredientName}</td>
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${TYPE_META[log.type]?.badge}`}>
+                                {TYPE_META[log.type]?.label}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap font-semibold">
+                              {log.type === 'import' ? '+' : log.type === 'adjust' ? '=' : '-'}
+                              {log.quantity} {log.ingredientUnit}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">
+                              {log.stockBefore} → <span className="font-medium text-gray-800">{log.stockAfter}</span>
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-600">
+                              {log.costPrice > 0 ? fmtVND(log.costPrice) : '—'}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">{log.supplier || '—'}</td>
+                            <td className="px-3 py-3 whitespace-nowrap text-xs">
+                              {log.expiryDate ? (
+                                <span className={new Date(log.expiryDate) <= new Date(Date.now() + 7*86400000) ? 'text-red-500 font-medium' : 'text-gray-600'}>
+                                  {fmtDate(log.expiryDate)}
+                                </span>
+                              ) : '—'}
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-500 max-w-[160px]">
+                              <p className="truncate">{log.reason || '—'}</p>
+                              {log.batchNote && <p className="text-gray-400 truncate">{log.batchNote}</p>}
+                            </td>
+                            <td className="px-3 py-3 whitespace-nowrap text-xs text-gray-500">
+                              {typeof log.createdBy === 'object' && log.createdBy ? (log.createdBy as { displayName: string }).displayName : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
+                  {/* Pagination */}
+                  {logsData.totalPages > 1 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+                      <p className="text-xs text-gray-500">Tổng {logsData.total} giao dịch</p>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setLogPage(p => Math.max(1, p-1))} disabled={logPage === 1} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30">
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        {Array.from({ length: Math.min(logsData.totalPages, 7) }, (_, i) => i + 1).map(p => (
+                          <button key={p} onClick={() => setLogPage(p)}
+                            className={`w-7 h-7 rounded text-xs font-medium ${p === logPage ? 'bg-purple-600 text-white' : 'hover:bg-gray-100 text-gray-600'}`}>
+                            {p}
+                          </button>
+                        ))}
+                        <button onClick={() => setLogPage(p => Math.min(logsData.totalPages, p+1))} disabled={logPage === logsData.totalPages} className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-30">
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ════════════════ TAB: EXPIRY ════════════════ */}
+        {tab === 'expiry' && (
+          <div className="space-y-4">
+            {expiryAlerts.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm py-16 text-center">
+                <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500 font-medium">Không có nguyên liệu nào sắp hết hạn trong 14 ngày tới</p>
+                <p className="text-gray-400 text-sm mt-1">Hệ thống sẽ cảnh báo khi có lô hàng sắp hết hạn</p>
               </div>
-              {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
-              <div className="flex gap-2 mt-5">
-                <button onClick={handleAddIngredient} disabled={submitting} className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-50">{submitting ? 'Đang lưu...' : 'Thêm'}</button>
-                <button onClick={() => setShowAddIngredient(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
+            ) : expiryAlerts.map(alert => (
+              <div key={alert.ingredient._id} className="bg-white rounded-xl border border-orange-200 shadow-sm overflow-hidden">
+                <div className="bg-orange-50 px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-orange-500" />
+                    <span className="font-semibold text-gray-800">{alert.ingredient.name}</span>
+                    <span className="text-sm text-gray-500">— Tồn kho: <span className="font-medium">{alert.ingredient.stock} {alert.ingredient.unit}</span></span>
+                  </div>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {alert.batches.map(batch => (
+                    <div key={batch._id} className="px-5 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">
+                          Số lượng: {batch.quantity} {alert.ingredient.unit}
+                          {batch.batchNote && <span className="text-gray-500 font-normal"> — {batch.batchNote}</span>}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-500">HSD: <span className="font-medium">{fmtDate(batch.expiryDate)}</span></p>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${batch.daysLeft <= 3 ? 'bg-red-100 text-red-700' : batch.daysLeft <= 7 ? 'bg-orange-100 text-orange-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                          Còn {batch.daysLeft} ngày
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Low stock section */}
+            {(stats?.lowStock ?? 0) > 0 && (
+              <div className="bg-white rounded-xl border border-red-200 shadow-sm overflow-hidden">
+                <div className="bg-red-50 px-5 py-3 flex items-center gap-2">
+                  <TrendingDown className="w-5 h-5 text-red-500" />
+                  <span className="font-semibold text-gray-800">Nguyên liệu sắp hết ({stats?.lowStock} loại)</span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {ingredients.filter(i => i.isLowStock).map(ing => (
+                    <div key={ing._id} className="px-5 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-gray-800 text-sm">{ing.name}</p>
+                        <p className="text-xs text-gray-400">{ing.supplier || 'Chưa có nhà cung cấp'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-red-600">{ing.stock} {ing.unit}</p>
+                        <p className="text-xs text-gray-400">Ngưỡng: {ing.minThreshold} {ing.unit}</p>
+                      </div>
+                      <button onClick={() => openMovement(ing, 'import')} className="ml-4 bg-green-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-green-600">
+                        Nhập ngay
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════ MODAL: THÊM ═══════════════ */}
+        {showAdd && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center px-6 py-4 border-b">
+                <h2 className="text-lg font-bold text-gray-800">Thêm nguyên liệu mới</h2>
+                <button onClick={() => setShowAdd(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Tên nguyên liệu *</label>
+                    <input type="text" placeholder="VD: Bột mì số 11" value={addForm.name} onChange={e => setAddForm(f => ({...f, name: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Đơn vị *</label>
+                    <input type="text" placeholder="kg, lít, quả, hộp..." value={addForm.unit} onChange={e => setAddForm(f => ({...f, unit: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Danh mục</label>
+                    <select value={addForm.category} onChange={e => setAddForm(f => ({...f, category: e.target.value as IngredientCategory}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300">
+                      {(Object.entries(INGREDIENT_CATEGORIES) as [IngredientCategory, string][]).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Tồn kho ban đầu</label>
+                    <input type="number" min="0" step="any" placeholder="0" value={addForm.stock} onChange={e => setAddForm(f => ({...f, stock: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Ngưỡng cảnh báo</label>
+                    <input type="number" min="0" step="any" placeholder="0" value={addForm.minThreshold} onChange={e => setAddForm(f => ({...f, minThreshold: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Giá nhập (VNĐ/đơn vị)</label>
+                    <input type="number" min="0" placeholder="0" value={addForm.costPrice} onChange={e => setAddForm(f => ({...f, costPrice: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Nhà cung cấp</label>
+                    <input type="text" placeholder="Tên nhà CC..." value={addForm.supplier} onChange={e => setAddForm(f => ({...f, supplier: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Ghi chú (cách bảo quản...)</label>
+                    <input type="text" placeholder="VD: Bảo quản nơi khô ráo, thoáng mát" value={addForm.note} onChange={e => setAddForm(f => ({...f, note: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                </div>
+                {error && <p className="text-red-500 text-sm">{error}</p>}
+              </div>
+              <div className="px-6 py-4 border-t flex gap-2">
+                <button onClick={handleAdd} disabled={submitting} className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-50">
+                  {submitting ? 'Đang lưu...' : 'Thêm nguyên liệu'}
+                </button>
+                <button onClick={() => setShowAdd(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Modal Sửa */}
-        {editIngredient && (
+        {/* ═══════════════ MODAL: SỬA ═══════════════ */}
+        {editIng && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <div className="flex justify-between items-center mb-5">
-                <h2 className="text-lg font-bold">Sửa nguyên liệu</h2>
-                <button onClick={() => setEditIngredient(null)}><X className="w-5 h-5 text-gray-400" /></button>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center px-6 py-4 border-b">
+                <h2 className="text-lg font-bold text-gray-800">Sửa: {editIng.name}</h2>
+                <button onClick={() => setEditIng(null)}><X className="w-5 h-5 text-gray-400" /></button>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tên *</label>
-                  <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
+              <div className="px-6 py-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Tên *</label>
+                    <input type="text" value={editForm.name} onChange={e => setEditForm(f => ({...f, name: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Đơn vị *</label>
+                    <input type="text" value={editForm.unit} onChange={e => setEditForm(f => ({...f, unit: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Danh mục</label>
+                    <select value={editForm.category} onChange={e => setEditForm(f => ({...f, category: e.target.value as IngredientCategory}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300">
+                      {(Object.entries(INGREDIENT_CATEGORIES) as [IngredientCategory, string][]).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Ngưỡng cảnh báo</label>
+                    <input type="number" min="0" step="any" value={editForm.minThreshold} onChange={e => setEditForm(f => ({...f, minThreshold: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Giá nhập (VNĐ/đơn vị)</label>
+                    <input type="number" min="0" value={editForm.costPrice} onChange={e => setEditForm(f => ({...f, costPrice: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Nhà cung cấp</label>
+                    <input type="text" value={editForm.supplier} onChange={e => setEditForm(f => ({...f, supplier: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">Ghi chú</label>
+                    <input type="text" value={editForm.note} onChange={e => setEditForm(f => ({...f, note: e.target.value}))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Đơn vị *</label>
-                  <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" value={editForm.unit} onChange={e => setEditForm({...editForm, unit: e.target.value})} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Ngưỡng cảnh báo</label>
-                  <input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" value={editForm.minThreshold} onChange={e => setEditForm({...editForm, minThreshold: parseFloat(e.target.value)||0})} />
-                </div>
+                <p className="text-xs text-gray-400 italic">* Tồn kho không sửa trực tiếp. Dùng chức năng "Kiểm kê" để điều chỉnh.</p>
+                {error && <p className="text-red-500 text-sm">{error}</p>}
               </div>
-              {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
-              <div className="flex gap-2 mt-5">
-                <button onClick={handleEditIngredient} disabled={submitting} className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-50">{submitting ? 'Đang lưu...' : 'Cập nhật'}</button>
-                <button onClick={() => setEditIngredient(null)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
+              <div className="px-6 py-4 border-t flex gap-2">
+                <button onClick={handleEdit} disabled={submitting} className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition text-sm font-medium disabled:opacity-50">
+                  {submitting ? 'Đang lưu...' : 'Cập nhật'}
+                </button>
+                <button onClick={() => setEditIng(null)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Modal Nhập/Xuất/Hủy */}
-        {modalOpen && selectedIngredient && (
+        {/* ═══════════════ MODAL: MOVEMENT ═══════════════ */}
+        {mvModal && mvIng && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold">
-                  {modalType === 'import' && `Nhập kho: ${selectedIngredient.name}`}
-                  {modalType === 'export' && `Xuất kho: ${selectedIngredient.name}`}
-                  {modalType === 'spoilage' && `Hủy / Hao hụt: ${selectedIngredient.name}`}
-                </h2>
-                <button onClick={() => setModalOpen(false)}><X className="w-5 h-5 text-gray-400" /></button>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">Tồn kho hiện tại: <span className="font-semibold text-gray-800">{selectedIngredient.stock} {selectedIngredient.unit}</span></p>
-              <div className="space-y-3">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center px-6 py-4 border-b">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Số lượng ({selectedIngredient.unit}) *</label>
-                  <input type="number" step="any" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" value={quantity || ''} onChange={e => setQuantity(parseFloat(e.target.value)||0)} />
+                  <h2 className="text-lg font-bold text-gray-800">{TYPE_META[mvType].label}</h2>
+                  <p className="text-sm text-gray-500">{mvIng.name} — Tồn: <span className="font-semibold text-gray-800">{mvIng.stock} {mvIng.unit}</span></p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Lý do {modalType === 'spoilage' && <span className="text-red-500">*</span>}</label>
-                  <input type="text" placeholder={modalType==='import'?'Nhập từ nhà cung cấp...':modalType==='export'?'Dùng làm bánh...':'Hết hạn, hư hỏng...'} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" value={reason} onChange={e => setReason(e.target.value)} />
+                <button onClick={() => setMvModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+
+              {/* Type selector */}
+              <div className="px-6 pt-4">
+                <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4">
+                  {(['import', 'export', 'spoilage', 'adjust'] as MovementType[]).map(t => (
+                    <button key={t} onClick={() => { setMvType(t); setError(''); }}
+                      className={`flex-1 py-1.5 rounded-md text-xs font-medium transition ${mvType === t ? `${TYPE_META[t].btn} text-white` : 'text-gray-500 hover:bg-white'}`}>
+                      {TYPE_META[t].label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
-              <div className="flex gap-2 mt-5">
-                <button onClick={handleAction} disabled={submitting} className={`flex-1 text-white py-2 rounded-lg transition text-sm font-medium disabled:opacity-50 ${modalType==='import'?'bg-green-500 hover:bg-green-600':modalType==='export'?'bg-blue-500 hover:bg-blue-600':'bg-orange-500 hover:bg-orange-600'}`}>
+
+              <div className="px-6 pb-4 space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">
+                    {mvType === 'adjust' ? 'Tồn kho thực tế (sau kiểm kê) *' : `Số lượng (${mvIng.unit}) *`}
+                  </label>
+                  <input type="number" min="0" step="any" placeholder="0" value={mvForm.quantity}
+                    onChange={e => setMvForm(f => ({...f, quantity: e.target.value}))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                  {mvType === 'adjust' && (
+                    <p className="text-xs text-gray-400 mt-1">Nhập số lượng thực tế đếm được khi kiểm kê. Hệ thống sẽ tự điều chỉnh.</p>
+                  )}
+                </div>
+
+                {mvType === 'import' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Giá nhập (VNĐ/{mvIng.unit})</label>
+                        <input type="number" min="0" placeholder={String(mvIng.costPrice || 0)} value={mvForm.costPrice}
+                          onChange={e => setMvForm(f => ({...f, costPrice: e.target.value}))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Nhà cung cấp</label>
+                        <input type="text" placeholder={mvIng.supplier || 'Tên nhà CC...'} value={mvForm.supplier}
+                          onChange={e => setMvForm(f => ({...f, supplier: e.target.value}))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Ngày hết hạn (HSD)</label>
+                        <input type="date" min={today()} value={mvForm.expiryDate}
+                          onChange={e => setMvForm(f => ({...f, expiryDate: e.target.value}))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600 mb-1 block">Số lô / ghi chú lô</label>
+                        <input type="text" placeholder="VD: Lô A-2026-04" value={mvForm.batchNote}
+                          onChange={e => setMvForm(f => ({...f, batchNote: e.target.value}))}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600 mb-1 block">
+                    Lý do {mvType === 'spoilage' && <span className="text-red-500">*</span>}
+                    {mvType === 'adjust' && <span className="text-gray-400"> (ghi chú kiểm kê)</span>}
+                  </label>
+                  <input type="text"
+                    placeholder={mvType === 'import' ? 'Nhập từ nhà cung cấp...' : mvType === 'export' ? 'Dùng làm bánh sinh nhật...' : mvType === 'spoilage' ? 'Hết hạn, hư hỏng...' : 'Kiểm kê định kỳ tháng 4...'}
+                    value={mvForm.reason} onChange={e => setMvForm(f => ({...f, reason: e.target.value}))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300" />
+                </div>
+
+                {mvForm.quantity && parseFloat(mvForm.quantity) > 0 && mvType === 'import' && mvForm.costPrice && parseFloat(mvForm.costPrice) > 0 && (
+                  <div className="bg-green-50 rounded-lg px-3 py-2 text-sm text-green-700">
+                    💰 Tổng tiền lô hàng: <span className="font-bold">{fmtVND(parseFloat(mvForm.quantity) * parseFloat(mvForm.costPrice))}</span>
+                  </div>
+                )}
+
+                {error && <p className="text-red-500 text-sm">{error}</p>}
+              </div>
+
+              <div className="px-6 py-4 border-t flex gap-2">
+                <button onClick={handleMovement} disabled={submitting}
+                  className={`flex-1 text-white py-2 rounded-lg transition text-sm font-medium disabled:opacity-50 ${TYPE_META[mvType].btn}`}>
                   {submitting ? 'Đang xử lý...' : 'Xác nhận'}
                 </button>
-                <button onClick={() => setModalOpen(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
+                <button onClick={() => setMvModal(false)} className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Hủy</button>
               </div>
             </div>
           </div>
