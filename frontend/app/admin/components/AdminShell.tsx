@@ -98,7 +98,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }, [user, loading, router]);
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="text-center">
         <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
         <p className="text-gray-400 text-sm">Đang tải...</p>
@@ -198,7 +198,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       {/* ── MAIN ────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Top header */}
-        <header className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 shadow-sm">
+        <header className="sticky top-2 mx-4 z-10 flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-md">
           <div className="flex items-center gap-4">
             {/* Mobile menu button */}
             <button

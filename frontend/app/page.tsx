@@ -16,7 +16,6 @@ export default function Home() {
       <OrderCakePage />
       <NewsSectionPage />
       <SubscribePage />
-
     </main>
   );
 }

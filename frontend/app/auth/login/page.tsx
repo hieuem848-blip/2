@@ -33,7 +33,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f3efe9] flex items-center justify-center px-4 py-12">
+    <div className="min-h-full bg-[#f3efe9] flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl px-8 py-10">
         <p className="text-gray-400 text-sm tracking-widest uppercase mb-2">Witchy Bakery</p>
         <h1 className="text-3xl font-serif text-gray-800 mb-2">Chào bạn trở lại.</h1>
