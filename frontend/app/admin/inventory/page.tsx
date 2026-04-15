@@ -42,6 +42,7 @@ export default function InventoryPage() {
 
   // ── filters ──
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [filterCategory, setFilterCategory] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
   const [logFilter, setLogFilter] = useState({ type: 'all', fromDate: '', toDate: '', ingredientId: '' });
@@ -65,18 +66,24 @@ export default function InventoryPage() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [tableLoading, setTableLoading] = useState(false);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
   // ── loaders ──
   const loadIngredients = useCallback(async () => {
+  setTableLoading(true);
+  try {
     const res = await adminInventoryApi.getAll({
-      search: search || undefined,
+      search: debouncedSearch || undefined, 
       category: filterCategory || undefined,
       lowStock: filterLowStock ? '1' : undefined,
     });
     setIngredients(res.ingredients);
-  }, [search, filterCategory, filterLowStock]);
+  } finally {
+    setTableLoading(false);
+  }
+}, [debouncedSearch, filterCategory, filterLowStock]);
 
   const loadStats = useCallback(async () => {
     const s = await adminInventoryApi.getStats();
@@ -104,15 +111,33 @@ export default function InventoryPage() {
   }, []);
 
   const loadAll = useCallback(async () => {
-    setLoading(true);
-    try { await Promise.all([loadIngredients(), loadStats(), loadExpiry()]); }
-    catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  }, [loadIngredients, loadStats, loadExpiry]);
+  setLoading(true);
+  try {
+    await Promise.all([
+      loadStats(),
+      loadExpiry(),
+    ]);
+  } finally {
+    setLoading(false);
+  }
+}, [loadStats, loadExpiry]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+useEffect(() => {
+  loadAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
   useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab, loadLogs]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 400); // delay 400ms
 
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+  loadIngredients();
+}, [debouncedSearch, filterCategory, filterLowStock]);
   // ── add ──
   const handleAdd = async () => {
     if (!addForm.name.trim() || !addForm.unit.trim()) { setError('Vui lòng điền tên và đơn vị'); return; }
@@ -124,6 +149,7 @@ export default function InventoryPage() {
         costPrice: parseFloat(addForm.costPrice) || 0, supplier: addForm.supplier, note: addForm.note,
       });
       await loadAll();
+      await loadIngredients();
       setShowAdd(false);
       setAddForm({ name: '', unit: '', category: 'khac', stock: '', minThreshold: '', costPrice: '', supplier: '', note: '' });
       showToast('✅ Đã thêm nguyên liệu!');
@@ -149,6 +175,7 @@ export default function InventoryPage() {
         supplier: editForm.supplier, note: editForm.note,
       });
       await loadAll();
+      await loadIngredients();
       setEditIng(null);
       showToast('✅ Đã cập nhật!');
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Lỗi'); }
@@ -158,7 +185,7 @@ export default function InventoryPage() {
   // ── delete ──
   const handleDelete = async (ing: Ingredient) => {
     if (!confirm(`Xoá nguyên liệu "${ing.name}"?`)) return;
-    try { await adminInventoryApi.delete(ing._id); await loadAll(); showToast(`🗑 Đã xoá "${ing.name}"`); }
+    try { await adminInventoryApi.delete(ing._id); await loadAll(); await loadIngredients(); showToast(`🗑 Đã xoá "${ing.name}"`); }
     catch (e: unknown) { alert(e instanceof Error ? e.message : 'Lỗi'); }
   };
 
@@ -182,7 +209,7 @@ export default function InventoryPage() {
         expiryDate: mvType === 'import' && mvForm.expiryDate ? mvForm.expiryDate : undefined,
         batchNote: mvForm.batchNote || undefined,
       });
-      await loadAll(); if (tab === 'logs') await loadLogs();
+      await loadAll(); await loadIngredients(); if (tab === 'logs') await loadLogs();
       setMvModal(false); setMvIng(null);
       showToast(`✅ ${TYPE_META[mvType].label} ${qty} ${mvIng.unit} ${mvIng.name}`);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Lỗi'); }
@@ -209,7 +236,7 @@ export default function InventoryPage() {
 
   return (
     <AdminShell>
-      <div className="p-6 bg-gray-50 min-h-screen">
+      <div className="min-h-full">
 
         {/* Toast */}
         {toast && (
@@ -224,10 +251,7 @@ export default function InventoryPage() {
             <h1 className="text-2xl font-bold text-gray-800">Quản lý kho nguyên liệu</h1>
             <p className="text-gray-500 text-sm mt-1">Theo dõi tồn kho, nhập xuất, hạn sử dụng và chi phí</p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={loadAll} className="flex items-center gap-1.5 text-sm text-gray-500 border rounded-lg px-3 py-2 bg-white hover:bg-gray-50 transition">
-              <RefreshCw className="w-4 h-4" /> Làm mới
-            </button>
+          <div>
             <button onClick={handleExportStock} className="flex items-center gap-1.5 text-sm text-white bg-green-600 hover:bg-green-700 rounded-lg px-3 py-2 transition">
               <Download className="w-4 h-4" /> Xuất Excel
             </button>
@@ -272,12 +296,18 @@ export default function InventoryPage() {
           <>
             {/* Filters + Add button */}
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center">
-              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <div className="relative flex-1 min-w-[200px]">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                  <Search className="w-4 h-4" />
+                </div>
                 <input
-                  type="text" placeholder="Tìm nguyên liệu..." value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="w-full text-sm outline-none"
+                  type="text"
+                  placeholder="Tìm kiếm nguyên liệu..."
+                  value={search}
+                  onChange={e => {
+                    setSearch(e.target.value);
+                  }}
+                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 transition-all"
                 />
               </div>
               <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}

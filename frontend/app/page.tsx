@@ -10,10 +10,10 @@ export default function Home() {
   return (
     <main>
       <HeroBannerPage />
-      <BrandSectionPage />
+      <OrderCakePage />
       <FeaturedProducts />
       <CommitmentSectionPage />
-      <OrderCakePage />
+      <BrandSectionPage />
       <NewsSectionPage />
       <SubscribePage />
     </main>

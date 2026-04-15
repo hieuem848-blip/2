@@ -68,6 +68,7 @@ app.use("/api/custom-cakes", protectedRoute, customCakeRoutes);
 app.use("/api/payments",     protectedRoute, paymentRoutes);
 app.use("/api/reviews",      reviewRoutes);
 app.use("/api/chats",        protectedRoute, chatRoutes);
+app.use("/api/orders", orderRoutes);
 
 /* ── ADMIN ──────────────────────────────────────────────────── */
 app.use("/api/admin/users",        adminUserRoutes);

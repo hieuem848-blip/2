@@ -177,3 +177,22 @@ export const cancelOrder = async (req, res) => {
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
+
+export const receiveImage = async (req, res) => {
+  try {
+    console.log("Đã nhận file");
+
+    console.log(req.file);
+
+    res.json({
+      message: "Upload thành công",
+      file: req.file.filename,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};

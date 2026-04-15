@@ -14,8 +14,8 @@ export default function CustomCakePage() {
   const [files, setFiles] = useState<CakeFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false); 
-  
+  const [isLoading, setIsLoading] = useState(false);
+
   // MỚI: State lưu kết quả trả về từ AI
   const [aiResult, setAiResult] = useState<any>(null);
 
@@ -44,7 +44,7 @@ export default function CustomCakePage() {
     });
     setFiles((prev) => [...prev, ...valid]);
     // Reset kết quả AI cũ khi chọn ảnh mới
-    setAiResult(null); 
+    setAiResult(null);
   }, []);
 
   const removeFile = (id: number) => {
@@ -69,52 +69,47 @@ export default function CustomCakePage() {
     }
 
     setIsLoading(true);
-    setAiResult(null); // Reset kết quả cũ trước khi chạy AI mới
-    showToast("AI đang phân tích ảnh, vui lòng đợi...");
+    setAiResult(null);
+
+    showToast("Đang upload ảnh lên server...");
 
     try {
+      // TẠO FORMDATA
       const formData = new FormData();
-      formData.append("file", files[0].file); 
 
-      // 1. Gọi AI
-      const aiResponse = await fetch("https://joyful-mirna-cubistically.ngrok-free.dev/predict_json", {
+      formData.append("file", files[0].file);
+
+      // LẤY TOKEN
+      const token = localStorage.getItem("accessToken");
+
+      console.log("Token:", token);
+
+      const response = await fetch("http://localhost:5001/api/orders/ai", {
         method: "POST",
-        headers: { "ngrok-skip-browser-warning": "true" },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       });
 
-      if (!aiResponse.ok) throw new Error(`AI Server trả về lỗi: ${aiResponse.status}`);
-      
-      const aiData = await aiResponse.json();
-      console.log("Dữ liệu gốc từ AI:", aiData);
-      
-      // MỚI: Lưu kết quả AI vào state để hiển thị lên UI
-      setAiResult(aiData); 
-      showToast("AI phân tích thành công!");
+      if (!response.ok) {
+        const text = await response.text();
 
-      // 2. Tạm thời MỞ COMMENT phần gửi BE để bạn xem kết quả AI trước.
-      // Khi nào AI hiển thị đúng trên giao diện rồi, bạn mới mở đoạn code BE ra nhé.
-      /*
-      const beResponse = await fetch("http://localhost:5000/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customer: "Khách hàng Vãng Lai",
-          items: aiData.data,
-          note: "Đơn hàng tự động từ AI"
-        }),
-      });
+        console.log("Response lỗi:", text);
 
-      if (beResponse.ok) {
-        showToast("Đặt hàng thành công!");
-        setFiles([]);
-      } else {
-        showToast("Lưu vào Database thất bại");
+        throw new Error(`Server lỗi: ${response.status}`);
       }
-      */
 
+      const data = await response.json();
+
+      console.log("Server trả về:", data);
+
+      setAiResult(data);
+
+      showToast("Upload thành công!");
     } catch (error: any) {
       console.error(error);
+
       showToast(`Lỗi: ${error.message}`);
     } finally {
       setIsLoading(false);
@@ -122,21 +117,34 @@ export default function CustomCakePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 pb-10">
+<div className="min-h-screen bg-gray-100 pb-10">
       <section className="relative w-full h-[300px]">
-        <Image src="/cakebg.png" alt="AI Cake Detection" fill className="object-cover" priority />
+        <Image
+          src="/cakebg.png"
+          alt="AI Cake Detection"
+          fill
+          className="object-cover"
+          priority
+        />
         <div className="absolute inset-0 bg-black/40"></div>
         <div className="absolute inset-0 flex flex-col justify-center items-center text-center text-white px-6">
-          <p className="text-xs tracking-[0.3em] mb-3 uppercase">Witchy Bakery AI</p>
+          <p className="text-xs tracking-[0.3em] mb-3 uppercase">
+            Witchy Bakery AI
+          </p>
           <h1 className="text-4xl font-bold">Đặt Bánh Bằng AI</h1>
-          <p className="mt-2 text-sm opacity-80">Chụp ảnh mẫu bánh bạn thích, AI sẽ lo phần còn lại</p>
+          <p className="mt-2 text-sm opacity-80">
+            Chụp ảnh mẫu bánh bạn thích, AI sẽ lo phần còn lại
+          </p>
         </div>
       </section>
 
       <div className="max-w-3xl mx-auto px-4 py-10">
         <div
           onClick={() => !isLoading && fileInputRef.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition 
@@ -144,29 +152,52 @@ export default function CustomCakePage() {
           ${isLoading ? "opacity-50 cursor-not-allowed" : "hover:border-pink-400"}`}
         >
           <input
-            type="file" multiple accept="image/*" ref={fileInputRef} className="hidden"
-            onChange={(e) => { addFiles([...(e.target.files ?? [])]); e.target.value = ""; }}
+            type="file"
+            multiple
+            accept="image/*"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={(e) => {
+              addFiles([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
             disabled={isLoading}
           />
           <p className="text-3xl mb-2">📸</p>
-          <p className="text-lg font-semibold text-gray-700">Tải ảnh mẫu bánh lên</p>
-          <p className="text-sm text-gray-500 mt-2">Kéo thả hoặc nhấn để chọn ảnh cho AI phân tích</p>
+          <p className="text-lg font-semibold text-gray-700">
+            Tải ảnh mẫu bánh lên
+          </p>
+          <p className="text-sm text-gray-500 mt-2">
+            Kéo thả hoặc nhấn để chọn ảnh cho AI phân tích
+          </p>
         </div>
 
         {files.length > 0 && (
           <div className="mt-8">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {files.map((f) => (
-                <div key={f.id} className="relative rounded-lg overflow-hidden border group">
-                  <img src={f.preview} className="w-full h-40 object-cover" alt="preview" />
+                <div
+                  key={f.id}
+                  className="relative rounded-lg overflow-hidden border group"
+                >
+                  <img
+                    src={f.preview}
+                    className="w-full h-40 object-cover"
+                    alt="preview"
+                  />
                   <button
-                    onClick={(e) => { e.stopPropagation(); removeFile(f.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFile(f.id);
+                    }}
                     className="absolute top-2 right-2 bg-black/70 text-white w-6 h-6 rounded-full hover:bg-red-500 transition"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
+</div>
         )}
 
         <div className="mt-10">
@@ -186,7 +217,7 @@ export default function CustomCakePage() {
             <h3 className="text-xl font-bold text-pink-800 mb-4 flex items-center gap-2">
               ✨ Kết quả từ AI
             </h3>
-            
+
             {/* Tùy thuộc vào cấu trúc JSON trả về của AI, bạn sửa đoạn này. 
                 Giả sử AI trả về: { "loai_banh": "Bánh kem socola", "topping": ["dâu", "nến"] } */}
             <div className="space-y-3">
@@ -204,7 +235,6 @@ export default function CustomCakePage() {
             </button>
           </div>
         )}
-
       </div>
 
       {toast && (
