@@ -12,6 +12,23 @@ import ProductImage from "../models/ProductImage.js";
 import ProductVariant from "../models/ProductVariant.js";
 import Category from "../models/Category.js";
 
+// Hàm phụ để gắn ảnh chính vào mỗi sản phẩm trong danh sách
+async function attachMainImages(products) {
+  const ids = products.map(p => p._id);
+  const mainImgs = await ProductImage.find({
+    product: { $in: ids },
+    isMain: true,
+  }).select("product imageUrl");
+
+  const map = {};
+  mainImgs.forEach(img => { map[img.product.toString()] = img.imageUrl; });
+
+  return products.map(p => ({
+    ...p.toObject(),
+    mainImage: map[p._id.toString()] || null,
+  }));
+}
+
 //GET /api/products (Danh sách sản phẩm + lọc + search + pagination)
 export const getProducts = async (req, res) => {
   try {
